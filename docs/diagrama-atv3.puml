@@ -1,0 +1,213 @@
+@startuml CineBridge - ATV III
+' Diagrama de classes da ATV III: Adapter, Composite e Decorator.
+' A parte do Adapter segue docs/diagrama-3.png. A imagem do enunciado é cortada à direita
+' (RecomendadorBase aparece pela metade, e Composite/Decorator não aparecem), então essas partes
+' foram completadas a partir do texto do enunciado. Divergências conscientes: ver docs/analise-antipadroes.md.
+' Visualize com a extensão PlantUML do VS Code ou em https://www.plantuml.com/plantuml
+!pragma layout smetana
+skinparam monochrome true
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+hide empty members
+
+class SistemaRecomendacao {
+  - adaptadorArmazenamento: AdaptadorArmazenamento
+  - adaptadorPagamento: AdaptadorPagamento
+  - adaptadorProfissional: AdaptadorProfissional
+  - estrategiaAtual: RecomendacaoStrategy
+  + executarRecomendacao(projeto: Projeto): Promise<ResultadoRecomendacao>
+  + definirEstrategia(estrategia: RecomendacaoStrategy): void
+  + configurarAdaptadores(armazenamento, pagamento, profissional): void
+  + anexarArquivo(projetoId, conteudo: Buffer, metadados): Promise<string>
+  + pagarEquipe(projeto: Projeto): Promise<PagamentoMembro[]>
+  + registrarAvaliacao(profissionalId, avaliacao: Avaliacao): Promise<void>
+}
+note right of SistemaRecomendacao
+  decorarEstrategia (injetado) aplica a pilha de
+  decoradores; a regra de pagamento fica em
+  pagamentoEquipe(), fora desta classe.
+end note
+
+package "Adapter: armazenamento" {
+  interface AdaptadorArmazenamento {
+    + salvarArquivo(conteudo: Buffer, metadados: MetadadosArquivo): Promise<string>
+    + recuperarArquivo(id: string): Promise<Buffer>
+    + listarArquivos(prefixo: string): Promise<string[]>
+  }
+  class AdaptadorS3
+  class AdaptadorGoogleCloud
+  class AdaptadorLocal
+  class ApiS3Simulada {
+    + putObject(params): Promise<{ETag}>
+    + getObject(params): Promise<{Body}>
+    + listObjectsV2(params): Promise<pagina>
+  }
+  class ApiGoogleCloudStorageSimulada <<ArmazenamentoExterno>> {
+    + upload(arquivo: File): Promise<string>
+    + download(id: string): Promise<File>
+    + listar(pasta: string): Promise<string[]>
+  }
+  AdaptadorArmazenamento <|.. AdaptadorS3
+  AdaptadorArmazenamento <|.. AdaptadorGoogleCloud
+  AdaptadorArmazenamento <|.. AdaptadorLocal
+  AdaptadorS3 "1" --> "1" ApiS3Simulada : adapta
+  AdaptadorGoogleCloud "1" --> "1" ApiGoogleCloudStorageSimulada : adapta
+  note bottom of AdaptadorLocal : adapta o próprio disco (node:fs)
+}
+
+package "Adapter: pagamento" {
+  interface AdaptadorPagamento {
+    + efetuarPagamento(valor: number, origem: string, destino: string): Promise<string>
+    + cancelarPagamento(id: string): Promise<boolean>
+    + verificarPagamento(id: string): Promise<StatusPagamento>
+  }
+  class AdaptadorStripe
+  class AdaptadorPagSeguro
+  class AdaptadorPayPal
+  class ApiStripeSimulada {
+    + paymentIntents.create(params): Promise<PaymentIntent>
+    + refunds.create(params): Promise<Refund>
+  }
+  class ApiPagSeguroSimulada <<GatewayPagamento>> {
+    + processarPagamento(valor: number, dados: any): Promise<Transacao>
+    + estornarPagamento(id: string): Promise<boolean>
+    + consultarStatus(id: string): Promise<string>
+  }
+  class ApiPayPalSimulada {
+    + createOrder(params): Promise<Pedido>
+    + captureOrder(id): Promise<Captura>
+    + refundCapture(captureId): Promise<Status>
+  }
+  class Transacao {
+    codigo: string
+    valor: number
+    status: 1 | 3 | 6 | 7
+  }
+  AdaptadorPagamento <|.. AdaptadorStripe
+  AdaptadorPagamento <|.. AdaptadorPagSeguro
+  AdaptadorPagamento <|.. AdaptadorPayPal
+  AdaptadorStripe "1" --> "1" ApiStripeSimulada : adapta
+  AdaptadorPagSeguro "1" --> "1" ApiPagSeguroSimulada : adapta
+  AdaptadorPayPal "1" --> "1" ApiPayPalSimulada : adapta
+  ApiPagSeguroSimulada ..> Transacao
+}
+
+package "Adapter: profissionais" {
+  interface AdaptadorProfissional {
+    + listarProfissionais(criterios: FiltroCandidatos): Promise<Profissional[]>
+    + detalharProfissional(id: string): Promise<Profissional>
+    + registrarAvaliacao(id: string, avaliacao: Avaliacao): Promise<void>
+  }
+  class AdaptadorLinkedIn
+  class AdaptadorIndeed
+  class AdaptadorInterno
+  class ApiLinkedInSimulada <<ApiProfissionalExterna>> {
+    + buscarProfissionais(filtros: any): Promise<PerfilLinkedIn[]>
+    + obterPerfil(id: string): Promise<PerfilLinkedIn>
+    + avaliarProfissional(id: string, nota: number): Promise<void>
+  }
+  class ApiIndeedSimulada {
+    + search(params): Promise<resultados>
+    + getJobseeker(key): Promise<CandidatoIndeed>
+    + postReview(key, review): Promise<ok>
+  }
+  interface IProfissionalRepository
+  AdaptadorProfissional <|.. AdaptadorLinkedIn
+  AdaptadorProfissional <|.. AdaptadorIndeed
+  AdaptadorProfissional <|.. AdaptadorInterno
+  AdaptadorLinkedIn "1" --> "1" ApiLinkedInSimulada : adapta
+  AdaptadorIndeed "1" --> "1" ApiIndeedSimulada : adapta
+  AdaptadorInterno "1" --> "1" IProfissionalRepository : adapta
+}
+
+class ProvedorProfissionais {
+  + buscar(filtro): Promise<ResultadoBusca>
+  + trocarFonte(fonte: AdaptadorProfissional): void
+}
+note bottom of ProvedorProfissionais : timeout + circuit breaker + cache + fallback
+
+package "Composite" {
+  interface ServicoProjeto {
+    + nome: string
+    + calcularCusto(): number
+    + listarSubservicos(): ServicoProjeto[]
+    + obterPrazo(): number
+    + validar(): string[]
+    + listarAtomicos(): ServicoAtomicoInfo[]
+  }
+  class ServicoAtomico {
+    + papel: Papel
+    + peso: number
+    - custo: number
+    - prazo: number
+  }
+  class PacoteServico {
+    + paralelo: boolean
+    - subservicos: ServicoProjeto[]
+  }
+  class Projeto {
+    - servicoPrincipal: ServicoProjeto
+    + calcularCustoTotal(): number
+    + getPapeisObrigatorios(): RequisitoPapel[]
+  }
+  ServicoProjeto <|.. ServicoAtomico
+  ServicoProjeto <|.. PacoteServico
+  PacoteServico "1" o-- "1..*" ServicoProjeto : subservicos
+  Projeto "1" *-- "1" ServicoProjeto : servicoPrincipal
+  note bottom of PacoteServico
+    custo = soma dos filhos
+    prazo = soma (em sequência) ou maior (paralelo)
+  end note
+}
+
+package "Decorator" {
+  interface RecomendacaoStrategy {
+    + nome: string
+    + recomendar(projeto: Projeto, profissionais: Profissional[]): Map<Papel, Profissional[]>
+  }
+  abstract class RecomendadorBase {
+    + recomendar(projeto, profissionais): Map<Papel, Profissional[]>
+    # {abstract} rankear(projeto, profissionais): Ranking
+  }
+  class SimilaridadeCosseno
+  class FiltragemColaborativa
+  class RegrasOrcamento
+  abstract class RecomendadorDecorator {
+    # interno: RecomendacaoStrategy
+  }
+  class CacheDecorator {
+    + estatisticas()
+  }
+  class AuditoriaDecorator {
+    + getRegistros(): RegistroChamada[]
+  }
+  class CompressaoDecorator {
+    + ultimoPacote(): PacoteRecomendacao
+    + {static} descomprimir(pacote): ResultadoTransmitido
+  }
+  class PoliticaDecoradores {
+    + aplicar(estrategia, projeto): RecomendacaoStrategy
+    + definirPreferencia(produtorId, camadas): Camada[]
+  }
+  RecomendacaoStrategy <|.. RecomendadorBase
+  RecomendadorBase <|-- SimilaridadeCosseno
+  RecomendadorBase <|-- FiltragemColaborativa
+  RecomendadorBase <|-- RegrasOrcamento
+  RecomendacaoStrategy <|.. RecomendadorDecorator
+  RecomendadorDecorator "1" o-- "1" RecomendacaoStrategy : envolve
+  RecomendadorDecorator <|-- CacheDecorator
+  RecomendadorDecorator <|-- AuditoriaDecorator
+  RecomendadorDecorator <|-- CompressaoDecorator
+  PoliticaDecoradores ..> RecomendadorDecorator : monta a pilha
+}
+
+SistemaRecomendacao "1" --> "1" AdaptadorArmazenamento : utiliza
+SistemaRecomendacao "1" --> "1" AdaptadorPagamento : utiliza
+SistemaRecomendacao "1" --> "1" AdaptadorProfissional : utiliza
+SistemaRecomendacao "1" --> "1" ProvedorProfissionais
+ProvedorProfissionais "1" --> "1" AdaptadorProfissional : fonte
+SistemaRecomendacao "1" --> "0..1" RecomendacaoStrategy : utiliza
+SistemaRecomendacao ..> PoliticaDecoradores : decorarEstrategia
+SistemaRecomendacao ..> Projeto
+@enduml

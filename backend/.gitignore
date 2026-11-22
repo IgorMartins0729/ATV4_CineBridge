@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+# Mantém as variáveis de ambiente fora do git
+.env
+# Arquivos gravados pelo AdaptadorLocal (ARMAZENAMENTO=local)
+arquivos
+# Clientes Prisma gerados (um por banco/servi�o)
+generated

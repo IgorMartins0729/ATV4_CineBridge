@@ -1,0 +1,128 @@
+# Compatibilidade exigida no enunciado: Windows 10+ e Ubuntu 24.04+ (e derivados).
+# Cada push/PR roda typecheck, testes com cobertura, build e um smoke test da API real nos dois sistemas;
+# um job aplica as migrations dos 4 bancos e testa os repositórios num PostgreSQL de verdade; e outro sobe
+# o docker-compose.yml inteiro e testa o fluxo ponta a ponta (é onde o Docker roda de verdade).
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  testes:
+    name: Testes (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: backend/.nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Testes unitários e de integração (com cobertura mínima de 80%)
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke test (sobe o servidor e chama a API)
+        run: npm run smoke
+
+  postgres:
+    name: PostgreSQL (migrations + repositórios Prisma, um banco por serviço)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: cinebridge
+          POSTGRES_PASSWORD: cinebridge
+          POSTGRES_DB: profissionais
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cinebridge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: cinebridge
+      TESTAR_PRISMA: '1'
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: backend/.nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci
+
+      - name: Criar os bancos e aplicar as migrations de cada serviço
+        run: |
+          for banco in projetos recomendacoes notificacoes; do
+            psql -h localhost -U cinebridge -d profissionais -c "CREATE DATABASE $banco"
+          done
+          for banco in profissionais projetos recomendacoes notificacoes; do
+            DATABASE_URL="postgresql://cinebridge:cinebridge@localhost:5432/$banco?schema=public" \
+              npx prisma migrate deploy --schema prisma/$banco/schema.prisma
+          done
+
+      - name: Testes dos repositórios Prisma
+        run: npx vitest run tests/integration/prisma.test.ts
+
+  # ATV IV, etapas 6 e 7: sobe os 9 containers com o docker-compose.yml da raiz, espera todos os
+  # healthchecks e testa o fluxo completo (API -> RabbitMQ -> profissionais/projetos/notificações).
+  # Só no Ubuntu: os runners Windows do GitHub não rodam containers Linux.
+  docker:
+    name: Docker Compose (4 microsserviços + RabbitMQ + 4 PostgreSQL)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: backend/.nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Versões
+        run: docker --version && docker compose version
+
+      - name: Build e subida (espera os healthchecks)
+        run: docker compose up -d --build --wait --wait-timeout 300
+
+      - name: Estado dos containers
+        run: docker compose ps
+
+      - name: Teste ponta a ponta
+        working-directory: backend
+        run: npm ci && npm run e2e
+
+      - name: Logs (em caso de falha)
+        if: failure()
+        run: docker compose ps -a && docker compose logs --no-color
+
+      - name: Derrubar
+        if: always()
+        run: docker compose down -v

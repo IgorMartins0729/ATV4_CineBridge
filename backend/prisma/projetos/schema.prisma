@@ -1,0 +1,129 @@
+// Banco do serviço cinebridge-projetos (projetos-db): fonte de verdade dos projetos, equipes e convites.
+// Profissionais pertencem a outro serviço: aqui não há chave estrangeira para eles, só o id e uma cópia
+// (snapshot JSON) dos dados no momento em que entraram na equipe ou receberam o convite.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../generated/projetos"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Papel {
+  DIRETOR
+  DIRETOR_FOTOGRAFIA
+  SONOPLASTA
+  EDITOR
+  ROTEIRISTA
+  EFEITOS_VISUAIS
+}
+
+enum TipoCaptacao {
+  DOCUMENTARIO
+  FICCAO
+  ANIMACAO
+}
+
+enum TipoProjeto {
+  GERAL
+  DOCUMENTARIO
+  ANIMACAO
+  PUBLICITARIO
+}
+
+enum StatusConvite {
+  PENDENTE
+  ACEITO
+  RECUSADO
+  CANCELADO
+}
+
+enum StatusEquipe {
+  EM_FORMACAO
+  FORMADA
+}
+
+model Projeto {
+  id              String         @id
+  tipoProjeto     TipoProjeto    @default(GERAL) @map("tipo_projeto")
+  /// atributos próprios do tipo (tema, técnica, cliente...)
+  especificos     Json           @default("{}")
+  /// hierarquia de serviços (Composite)
+  servicos        Json
+  titulo          String
+  produtorId      String         @map("produtor_id")
+  produtorNome    String         @map("produtor_nome")
+  produtorEmail   String         @map("produtor_email")
+  genero          String
+  duracao         Float
+  orcamento       Float
+  prazo           DateTime
+  tipoCaptacao    TipoCaptacao   @map("tipo_captacao")
+  cidade          String
+  uf              String         @db.Char(2)
+  estrategia      String?
+  /// ids dos profissionais rejeitados pelo produtor neste projeto
+  rejeitados      String[]
+  criadoEm        DateTime       @default(now()) @map("criado_em")
+
+  papeis          RequisitoPapel[]
+  equipe          Equipe?
+  convites        Convite[]
+
+  @@index([produtorId])
+  @@map("projetos")
+}
+
+model RequisitoPapel {
+  projetoId String  @map("projeto_id")
+  papel     Papel
+  peso      Float
+  projeto   Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+
+  @@id([projetoId, papel])
+  @@map("requisitos_papel")
+}
+
+model Equipe {
+  id           String         @id
+  projetoId    String         @unique @map("projeto_id")
+  status       StatusEquipe
+  dataFormacao DateTime?      @map("data_formacao")
+  projeto      Projeto        @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+  membros      MembroEquipe[]
+
+  @@map("equipes")
+}
+
+model MembroEquipe {
+  equipeId       String       @map("equipe_id")
+  papel          Papel
+  profissionalId String       @map("profissional_id")
+  /// snapshot do profissional (dono: cinebridge-profissionais)
+  profissional   Json
+  confirmado     Boolean      @default(false)
+  equipe         Equipe       @relation(fields: [equipeId], references: [id], onDelete: Cascade)
+
+  @@id([equipeId, papel])
+  @@unique([equipeId, profissionalId])
+  @@map("membros_equipe")
+}
+
+model Convite {
+  id             String        @id
+  projetoId      String        @map("projeto_id")
+  papel          Papel
+  profissionalId String        @map("profissional_id")
+  /// snapshot do profissional (dono: cinebridge-profissionais)
+  profissional   Json
+  status         StatusConvite
+  criadoEm       DateTime      @map("criado_em")
+  respondidoEm   DateTime?     @map("respondido_em")
+  projeto        Projeto       @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+
+  @@index([projetoId])
+  @@map("convites")
+}

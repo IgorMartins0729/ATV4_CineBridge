@@ -1,0 +1,11 @@
+# Nada disto entra no contexto de build. Principalmente o node_modules do Windows,
+# que tem binários nativos errados para o Linux do container.
+node_modules
+dist
+coverage
+generated
+.env
+arquivos
+tests
+scripts
+docker/*.env

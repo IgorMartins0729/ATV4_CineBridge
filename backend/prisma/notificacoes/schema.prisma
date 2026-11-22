@@ -1,0 +1,29 @@
+// Banco do serviço cinebridge-notificacoes (notificacoes-db): tudo o que foi enviado (e-mails e mensagens internas).
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../generated/notificacoes"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Canal {
+  EMAIL
+  INTERNA
+}
+
+model Notificacao {
+  id           Int      @id @default(autoincrement())
+  canal        Canal
+  /// e-mail (canal EMAIL) ou id do produtor/profissional (canal INTERNA)
+  destinatario String
+  titulo       String
+  texto        String
+  criadaEm     DateTime @default(now()) @map("criada_em")
+
+  @@index([destinatario])
+  @@map("notificacoes")
+}

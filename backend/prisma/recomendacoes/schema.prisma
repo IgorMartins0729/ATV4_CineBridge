@@ -1,0 +1,35 @@
+// Banco do cinebridge-api (recomendacoes-db): histórico das recomendações geradas.
+// projetoId é só uma referência ao cinebridge-projetos (sem chave estrangeira entre serviços).
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../generated/recomendacoes"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Papel {
+  DIRETOR
+  DIRETOR_FOTOGRAFIA
+  SONOPLASTA
+  EDITOR
+  ROTEIRISTA
+  EFEITOS_VISUAIS
+}
+
+model Recomendacao {
+  id                  String   @id
+  projetoId           String   @map("projeto_id")
+  estrategia          String
+  parcial             Boolean
+  papeisSemCandidatos Papel[]  @map("papeis_sem_candidatos")
+  /// { [papel]: [{ profissional, pontuacao }] }: snapshot do ranking, com os dados de cada profissional na época
+  ranking             Json
+  geradaEm            DateTime @map("gerada_em")
+
+  @@index([projetoId])
+  @@map("recomendacoes")
+}

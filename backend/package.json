@@ -1,0 +1,55 @@
+{
+  "name": "cinebridge",
+  "version": "1.0.0",
+  "description": "CineBridge: plataforma de recomendação e orquestração de equipes audiovisuais em microsserviços (ATV I a III: padrões de projeto; ATV IV: containers + RabbitMQ)",
+  "main": "dist/server.js",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "imports": {
+    "#prisma/*": "./generated/*/index.js"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --env-file-if-exists=.env dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "demo": "tsx scripts/demo.ts",
+    "carga": "tsx scripts/carga.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "e2e": "tsx scripts/e2e.ts",
+    "postinstall": "prisma generate --schema prisma/profissionais/schema.prisma && prisma generate --schema prisma/projetos/schema.prisma && prisma generate --schema prisma/recomendacoes/schema.prisma && prisma generate --schema prisma/notificacoes/schema.prisma"
+  },
+  "keywords": [
+    "cinebridge",
+    "design-patterns",
+    "fastify",
+    "prisma",
+    "rabbitmq",
+    "docker",
+    "typescript"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/amqplib": "^0.10.8",
+    "@types/autocannon": "^7.12.7",
+    "@types/node": "^26.4.1",
+    "@vitest/coverage-v8": "^5.0.2",
+    "autocannon": "^8.0.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "amqplib": "^0.10.9",
+    "fastify": "^5.12.3",
+    "pino": "^10.3.1",
+    "prisma": "^5.22.0"
+  }
+}

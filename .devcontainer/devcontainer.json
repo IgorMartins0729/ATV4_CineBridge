@@ -1,0 +1,19 @@
+// GitHub Codespaces: Ubuntu 24.04 + Docker + Node 24 no navegador, sem instalar nada na máquina.
+// No repositório do GitHub: Code > Codespaces > Create codespace. Depois, no terminal:
+//   docker compose up -d --build --wait && cd backend && npm run e2e
+// As portas 3000 (API) e 15672 (painel do RabbitMQ, guest/guest) aparecem na aba "Ports".
+{
+  "name": "CineBridge ATV IV",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "24" },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "forwardPorts": [3000, 15672],
+  "portsAttributes": {
+    "3000": { "label": "cinebridge-api" },
+    "15672": { "label": "RabbitMQ (guest/guest)" }
+  },
+  "postCreateCommand": "cd backend && npm ci",
+  "hostRequirements": { "cpus": 4, "memory": "8gb" }
+}

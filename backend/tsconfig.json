@@ -1,0 +1,33 @@
+{
+  // Configuração base: usada pelo editor e pelo typecheck (src + testes + scripts).
+  // O build usa tsconfig.build.json, que compila apenas src/.
+  "compilerOptions": {
+    // Ambiente
+    "module": "nodenext",
+    "target": "esnext",
+    "lib": ["esnext"],
+    "types": ["node"],
+
+    // Saída
+    "sourceMap": true,
+
+    // Checagem mais rígida
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Recomendados
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src", "tests", "scripts", "prisma", "vitest.config.ts"]
+}

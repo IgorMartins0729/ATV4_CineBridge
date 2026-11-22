@@ -1,0 +1,155 @@
+# CineBridge (ATV IV): 4 microsserviços + RabbitMQ + 4 PostgreSQL (um banco por serviço).
+#
+#   docker compose up -d --build      sobe tudo em segundo plano (espera os healthchecks com --wait)
+#   docker compose logs -f            acompanha os logs
+#   docker compose down               derruba (acrescente -v para apagar os dados)
+#
+# Compose v2 ("docker compose"). O "docker-compose" com hífen do enunciado é o Compose v1, descontinuado
+# e ausente no Docker atual do Ubuntu 24.04. Detalhes e outras decisões: docs/decisoes-atv4.md.
+#
+# Portas: só a API (3000) fica aberta para a rede. As demais do diagrama são publicadas apenas em
+# 127.0.0.1 (acessíveis da própria máquina, para depuração e para o painel do RabbitMQ).
+name: cinebridge
+
+x-servico: &servico
+  restart: unless-stopped
+  networks: [cinebridge-net]
+  healthcheck:
+    # O Alpine não tem curl; o wget do BusyBox já vem na imagem. 127.0.0.1 e não "localhost":
+    # no Alpine, localhost pode resolver para ::1 (IPv6), onde o Node não está escutando.
+    test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:$${PORT}/health || exit 1"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 40s
+
+x-postgres: &postgres
+  image: postgres:15-alpine
+  restart: unless-stopped
+  networks: [cinebridge-net]
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+    interval: 5s
+    timeout: 5s
+    retries: 10
+
+x-credenciais-postgres: &credenciais-postgres
+  POSTGRES_USER: cinebridge
+  POSTGRES_PASSWORD: cinebridge
+
+services:
+  # ---------- Barramento de mensagens ----------
+  cinebridge-mq:
+    image: rabbitmq:3-management-alpine
+    container_name: cinebridge-mq
+    # O RabbitMQ guarda os dados pelo nome do nó (rabbit@<hostname>); hostname fixo mantém o volume válido.
+    hostname: cinebridge-mq
+    restart: unless-stopped
+    networks: [cinebridge-net]
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      # Por padrão o RabbitMQ só aceita o usuário guest vindo do localhost; os serviços conectam de outros
+      # containers. Libera explicitamente, sem depender da configuração embutida na imagem.
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit loopback_users []"
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672" # painel: http://localhost:15672 (guest/guest)
+    volumes:
+      - mq-dados:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  # ---------- Bancos (um por microsserviço) ----------
+  # Dentro da rede todos escutam na 5432; as portas do diagrama (5432-5435) são as publicadas no host.
+  profissionais-db:
+    <<: *postgres
+    container_name: profissionais-db
+    environment: { <<: *credenciais-postgres, POSTGRES_DB: profissionais }
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [profissionais-dados:/var/lib/postgresql/data]
+
+  projetos-db:
+    <<: *postgres
+    container_name: projetos-db
+    environment: { <<: *credenciais-postgres, POSTGRES_DB: projetos }
+    ports: ["127.0.0.1:5433:5432"]
+    volumes: [projetos-dados:/var/lib/postgresql/data]
+
+  recomendacoes-db:
+    <<: *postgres
+    container_name: recomendacoes-db
+    environment: { <<: *credenciais-postgres, POSTGRES_DB: recomendacoes }
+    ports: ["127.0.0.1:5434:5432"]
+    volumes: [recomendacoes-dados:/var/lib/postgresql/data]
+
+  notificacoes-db:
+    <<: *postgres
+    container_name: notificacoes-db
+    environment: { <<: *credenciais-postgres, POSTGRES_DB: notificacoes }
+    ports: ["127.0.0.1:5435:5432"]
+    volumes: [notificacoes-dados:/var/lib/postgresql/data]
+
+  # ---------- Microsserviços ----------
+  cinebridge-profissionais:
+    <<: *servico
+    container_name: cinebridge-profissionais
+    build: { context: ./backend, dockerfile: docker/profissionais.Dockerfile }
+    env_file: ./backend/docker/profissionais.env
+    ports: ["127.0.0.1:3001:3001"]
+    depends_on:
+      profissionais-db: { condition: service_healthy }
+      cinebridge-mq: { condition: service_healthy }
+
+  cinebridge-projetos:
+    <<: *servico
+    container_name: cinebridge-projetos
+    build: { context: ./backend, dockerfile: docker/projetos.Dockerfile }
+    env_file: ./backend/docker/projetos.env
+    ports: ["127.0.0.1:3002:3002"]
+    depends_on:
+      projetos-db: { condition: service_healthy }
+      cinebridge-mq: { condition: service_healthy }
+
+  cinebridge-notificacoes:
+    <<: *servico
+    container_name: cinebridge-notificacoes
+    build: { context: ./backend, dockerfile: docker/notificacoes.Dockerfile }
+    env_file: ./backend/docker/notificacoes.env
+    ports: ["127.0.0.1:3003:3003"]
+    depends_on:
+      notificacoes-db: { condition: service_healthy }
+      cinebridge-mq: { condition: service_healthy }
+
+  cinebridge-api:
+    <<: *servico
+    container_name: cinebridge-api
+    build: { context: ./backend, dockerfile: docker/api.Dockerfile }
+    env_file: ./backend/docker/api.env
+    ports: ["3000:3000"] # único ponto de entrada público
+    depends_on:
+      recomendacoes-db: { condition: service_healthy }
+      cinebridge-mq: { condition: service_healthy }
+      # A API funciona sem eles (responde com erro/fallback), mas só faz sentido abrir a porta com todos de pé.
+      cinebridge-profissionais: { condition: service_healthy }
+      cinebridge-projetos: { condition: service_healthy }
+      cinebridge-notificacoes: { condition: service_healthy }
+
+networks:
+  # Rede bridge onde os containers se acham pelo nome do serviço. Não é "internal: true" porque
+  # isso impede publicar portas no host, e a API (3000) e o painel do RabbitMQ precisam ser acessíveis.
+  # O isolamento vem de publicar as portas internas só em 127.0.0.1.
+  cinebridge-net:
+    name: cinebridge-net
+    driver: bridge
+
+volumes:
+  mq-dados:
+  profissionais-dados:
+  projetos-dados:
+  recomendacoes-dados:
+  notificacoes-dados:
